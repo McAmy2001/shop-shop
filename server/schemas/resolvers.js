@@ -1,6 +1,7 @@
 const { AuthenticationError } = require('apollo-server-express');
 const { User, Product, Category, Order } = require('../models');
 const { signToken } = require('../utils/auth');
+const stripe = require('stripe')('sk_test_4eC39HqLyjWDarjtT1zdp7dc');
 
 const resolvers = {
   Query: {
@@ -50,8 +51,55 @@ const resolvers = {
       }
 
       throw new AuthenticationError('Not logged in');
+    },
+    checkout: async (parent, args, context) => {
+      const order = new Order({ products: args.products });
+      console.log(`This is the order ${order}`);
+      const products  = await order.populate('products');
+
+      const line_items = [];
+      console.log(`these are the products ${products.products.length}`);
+      
+      for (let i = 0; i < products.products.length; i++) {
+        // generate product id
+        console.log('you are here');
+        const product = await stripe.products.create({
+          name: products.products[i].name,
+          description: products.products[i].description,
+        });
+        
+
+        // generate price id using the product id
+         const price = await stripe.prices.create({
+           product: product.id,
+           unit_amount: products[i].price * 100,
+           currency: 'usd',
+         });
+         console.log(`this is price ${price}`);
+
+        // add price id to the line items array
+        line_items.push({
+          price: price.id,
+          quantity: 1
+        });
+        console.log(`here is the line item: ${line_items}`);
+      }
+      
+       const session = await stripe.checkout.sessions.create({
+         payment_method_types: ['card'],
+         line_items,
+         mode: 'payment',
+         success_url: 'https://example.com/success?session_id={CHECKOUT_SESSION_ID}',
+         cancel_url: 'https://example.com/cancel',
+         
+       });
+      
+      return { session: session.id };
     }
+    
+
   },
+
   Mutation: {
     addUser: async (parent, args) => {
       const user = await User.create(args);
